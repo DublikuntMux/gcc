@@ -328,6 +328,10 @@ mmsa
 Target Mask(MSA)
 Use MIPS MSA Extension instructions.
 
+mvfpu
+Target Var(TARGET_ALLEGREX_VFPU) Init(0)
+Use the Allegrex Vector Floating Point Unit.
+
 mmt
 Target Var(TARGET_MT)
 Allow the use of MT instructions.

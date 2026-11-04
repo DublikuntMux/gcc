@@ -1231,7 +1231,7 @@ Objective-C and Objective-C++ Dialects}.
 -mno-float  -msingle-float  -mdouble-float  -modd-spreg
 -mabs=@var{mode}  -mnan=@var{encoding}
 -mdsp  -mdspr2  -mmcu  -meva  -mvirt  -mxpa  -mcrc  -mginv
--mmicromips  -mmsa
+-mmicromips  -mmsa  -mvfpu
 -mloongson-mmi  -mloongson-ext  -mloongson-ext2
 -mfpu=@var{fpu-type}
 -msmartmips  -mpaired-single  -mdmx  -mips3d  -mmt  -mllsc
@@ -29634,6 +29634,24 @@ Use (do not use) the MIPS Global INValidate (GINV) instructions.
 @item -mmsa
 @itemx -mno-msa
 Use (do not use) the MIPS MSA extension instructions.
+
+@opindex mvfpu
+@opindex mno-vfpu
+@item -mvfpu
+@itemx -mno-vfpu
+Use (do not use) the Allegrex Vector Floating Point Unit.  The default is
+@option{-mno-vfpu}.  This requires little-endian uncompressed Allegrex,
+the o32 or 32-bit EABI, @option{-mhard-float}, @option{-msingle-float}, and an
+assembler that supports the Allegrex VFPU.
+
+With @option{-ffast-math}, the vectorizer can use four-lane
+single-precision VFPU addition, subtraction and multiplication.  Quad
+memory accesses require 16-byte alignment.  Stack boundaries and vector
+type alignment are unchanged.
+
+The VFPU must be available to the executing thread.  Generated code
+treats all VFPU registers as caller-clobbered and resets VFPU prefix
+state before arithmetic and register moves.
 
 @opindex mloongson-mmi
 @opindex mno-loongson-mmi

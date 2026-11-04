@@ -1531,6 +1531,10 @@ mips_insert_attributes (tree decl, tree *attributes)
       nocompression_flags |=
 	mips_get_compress_off_flags (DECL_ATTRIBUTES (decl));
 
+      if (TARGET_ALLEGREX_VFPU && compression_flags)
+	error ("%qs attribute is incompatible with %<-mvfpu%>",
+	       mips_get_compress_on_name (compression_flags));
+
       if (compression_flags && nocompression_flags)
 	error ("%qE cannot have both %qs and %qs attributes",
 	       DECL_NAME (decl), mips_get_compress_on_name (compression_flags),
@@ -2544,9 +2548,10 @@ mips_symbol_insns_1 (enum mips_symbol_type type, machine_mode mode)
 static int
 mips_symbol_insns (enum mips_symbol_type type, machine_mode mode)
 {
-  /* MSA LD.* and ST.* cannot support loading symbols via an immediate
-     operand.  */
-  if (mode != MAX_MACHINE_MODE && MSA_SUPPORTED_MODE_P (mode))
+  /* MSA and VFPU vector loads and stores require a base register.  */
+  if (mode != MAX_MACHINE_MODE
+      && (MSA_SUPPORTED_MODE_P (mode)
+	  || (TARGET_ALLEGREX_VFPU && mode == V4SFmode)))
     return 0;
 
   return mips_symbol_insns_1 (type, mode) * (TARGET_MIPS16 ? 2 : 1);
@@ -2672,6 +2677,12 @@ mips_valid_offset_p (rtx x, machine_mode mode)
       && !SMALL_OPERAND (INTVAL (x) + GET_MODE_SIZE (mode) - UNITS_PER_WORD))
     return false;
 
+  /* The VFPU memory formats encode offsets in multiples of four.
+     Leave room for the last scalar element of an unaligned quad move.  */
+  if (TARGET_ALLEGREX_VFPU && mode == V4SFmode
+      && (INTVAL (x) & 3) != 0)
+    return false;
+
   /* MSA LD.* and ST.* supports 10-bit signed offsets.  */
   if (MSA_SUPPORTED_MODE_P (mode)
       && !mips_signed_immediate_p (INTVAL (x), 10,
@@ -2757,7 +2768,8 @@ mips_classify_address (struct mips_address_info *info, rtx x,
       /* Small-integer addresses don't occur very often, but they
 	 are legitimate if $0 is a valid base register.  */
       info->type = ADDRESS_CONST_INT;
-      return !TARGET_MIPS16 && SMALL_INT (x);
+      return (!TARGET_MIPS16 && SMALL_INT (x)
+	      && !(TARGET_ALLEGREX_VFPU && mode == V4SFmode));
 
     case CONST:
     case LABEL_REF:
@@ -3054,6 +3066,8 @@ mips_const_insns (rtx x)
       return mips_build_integer (codes, INTVAL (x));
 
     case CONST_VECTOR:
+      if (TARGET_ALLEGREX_VFPU && GET_MODE (x) == V4SFmode)
+	return 0;
       if (MSA_SUPPORTED_MODE_P (GET_MODE (x))
 	  && mips_const_vector_same_int_p (x, GET_MODE (x), -512, 511))
 	return 1;
@@ -3905,14 +3919,35 @@ mips_legitimize_const_move (machine_mode mode, rtx dest, rtx src)
 bool
 mips_legitimize_move (machine_mode mode, rtx dest, rtx src)
 {
+  /* Packed vectors must not reach the VFPU memory instructions.  Copy
+     their representation through an aligned temporary instead.  */
+  if (TARGET_ALLEGREX_VFPU && mode == V4SFmode
+      && ((MEM_P (src) && MEM_ALIGN (src) < 32)
+	  || (MEM_P (dest) && MEM_ALIGN (dest) < 32)))
+    {
+      rtx temp = assign_stack_temp (mode, GET_MODE_SIZE (mode));
+      if (MEM_P (src) && MEM_ALIGN (src) < 32)
+	{
+	  emit_block_move (temp, src, GEN_INT (16), BLOCK_OP_NORMAL);
+	  emit_move_insn (dest, temp);
+	}
+      else
+	{
+	  emit_move_insn (temp, src);
+	  emit_block_move (dest, temp, GEN_INT (16), BLOCK_OP_NORMAL);
+	}
+      return true;
+    }
+
   /* Both src and dest are non-registers;  one special case is supported where
      the source is (const_int 0) and the store can source the zero register.
-     MIPS16 and MSA are never able to source the zero register directly in
+     MIPS16, MSA and VFPU cannot source the zero register directly in these
      memory operations.  */
   if (!register_operand (dest, mode)
       && !register_operand (src, mode)
       && (TARGET_MIPS16 || !const_0_operand (src, mode)
-	  || MSA_SUPPORTED_MODE_P (mode)))
+	  || MSA_SUPPORTED_MODE_P (mode)
+	  || (TARGET_ALLEGREX_VFPU && mode == V4SFmode)))
     {
       mips_emit_move (dest, force_reg (mode, src));
       return true;
@@ -4995,6 +5030,11 @@ mips_mult_move_p (rtx dest, rtx src, enum mips_split_type split_type)
 bool
 mips_split_move_p (rtx dest, rtx src, enum mips_split_type split_type)
 {
+  if (TARGET_ALLEGREX_VFPU && GET_MODE (dest) == V4SFmode
+      && ((REG_P (dest) && COP2_REG_P (REGNO (dest)))
+	  || (REG_P (src) && COP2_REG_P (REGNO (src)))))
+    return false;
+
   /* Check whether the move can be done using some variant of MULT $0,$0.  */
   if (mips_mult_move_p (dest, src, split_type))
     return false;
@@ -5033,7 +5073,27 @@ mips_split_move (rtx dest, rtx src, enum mips_split_type split_type,
   rtx low_dest;
 
   gcc_checking_assert (mips_split_move_p (dest, src, split_type));
-  if (MSA_SUPPORTED_MODE_P (GET_MODE (dest)))
+  if (TARGET_ALLEGREX_VFPU && GET_MODE (dest) == V4SFmode)
+    {
+      /* Preserve all four words, including when a load overwrites its
+	 own base register or the GPR groups overlap.  */
+      int deferred = -1;
+      bool reverse = (REG_P (dest) && REG_P (src)
+		      && REGNO (dest) > REGNO (src));
+      for (int i = 0; i < 4; ++i)
+	{
+	  int byte = (reverse ? 3 - i : i) * 4;
+	  rtx d = mips_subword_at_byte (dest, byte);
+	  if (MEM_P (src) && reg_overlap_mentioned_p (d, src))
+	    deferred = byte;
+	  else
+	    mips_emit_move (d, mips_subword_at_byte (src, byte));
+	}
+      if (deferred >= 0)
+	mips_emit_move (mips_subword_at_byte (dest, deferred),
+			mips_subword_at_byte (src, deferred));
+    }
+  else if (MSA_SUPPORTED_MODE_P (GET_MODE (dest)))
     mips_split_128bit_move (dest, src);
   else if (FP_REG_RTX_P (dest) || FP_REG_RTX_P (src))
     {
@@ -5344,6 +5404,82 @@ mips_split_move_insn (rtx dest, rtx src, rtx_insn *insn)
   mips_split_move (dest, src, mips_insn_split_type (insn), insn);
 }
 
+/* Move four consecutive floats using a quad operation if the memory is
+   16-byte aligned, and four scalar operations otherwise.  The o32 stack
+   boundary is unchanged, so ordinary spill slots use scalar accesses.  */
+
+const char *
+mips_output_vfpu_move (rtx dest, rtx src)
+{
+  gcc_assert (TARGET_ALLEGREX_VFPU);
+
+  bool dest_vfpu = REG_P (dest) && COP2_REG_P (REGNO (dest));
+  bool src_vfpu = REG_P (src) && COP2_REG_P (REGNO (src));
+  if (!dest_vfpu && !src_vfpu)
+    return mips_output_move (dest, src);
+
+  if (REG_P (dest) && REG_P (src) && dest_vfpu != src_vfpu)
+    {
+      rtx vec = dest_vfpu ? dest : src;
+      rtx gp = dest_vfpu ? src : dest;
+      unsigned int n = REGNO (vec) - COP2_REG_FIRST;
+      for (unsigned int lane = 0; lane < 4; ++lane)
+	{
+	  rtx ops[1] = { gen_rtx_REG (SImode, REGNO (gp) + lane) };
+	  char pattern[64];
+	  snprintf (pattern, sizeof (pattern),
+		    dest_vfpu ? "mtv\t%%0,S%u%u%u" : "mfv\t%%0,S%u%u%u",
+		    n / 4, n % 4, lane);
+	  output_asm_insn (pattern, ops);
+	}
+      return "";
+    }
+
+  if (REG_P (dest) && REG_P (src))
+    return ("vpfxs\tx,y,z,w\n\tvpfxt\tx,y,z,w\n\tvpfxd\t,,,\n\t"
+	    "vmov.q\t%P0,%P1");
+
+  bool load_p = REG_P (dest) && MEM_P (src);
+  gcc_assert (load_p || (MEM_P (dest) && REG_P (src)));
+
+  rtx mem = load_p ? src : dest;
+  rtx vec = load_p ? dest : src;
+  gcc_assert (COP2_REG_P (REGNO (vec)));
+
+  gcc_assert (MEM_ALIGN (mem) >= 32);
+
+  /* The o32 and EABI stack boundaries are only 64 bits.  In particular,
+     invisible reference arguments and hidden return buffers can refer to
+     stack temporaries even when their vector type has 128-bit alignment.
+     Do not use that type alignment as a guarantee for quad accesses.  */
+  tree expr = MEM_EXPR (mem);
+  tree base = expr ? get_base_address (expr) : NULL_TREE;
+  bool abi_mem = (!base || TREE_CODE (base) == RESULT_DECL
+		  || TREE_CODE (base) == PARM_DECL);
+  rtx addr = XEXP (mem, 0);
+  bool stack_mem = (reg_overlap_mentioned_p (stack_pointer_rtx, addr)
+		    || reg_overlap_mentioned_p (hard_frame_pointer_rtx, addr));
+  if (MEM_ALIGN (mem) >= 128 && !abi_mem && !stack_mem)
+    return load_p ? "lv.q\t%P0,%1" : "sv.q\t%P1,%0";
+
+  unsigned int n = REGNO (vec) - COP2_REG_FIRST;
+  unsigned int matrix = n / 4;
+  unsigned int column = n % 4;
+
+  for (unsigned int lane = 0; lane < 4; ++lane)
+    {
+      rtx scalar_mem = adjust_address (mem, SFmode, lane * 4);
+      rtx ops[2] = { load_p ? vec : scalar_mem,
+		     load_p ? scalar_mem : vec };
+      char pattern[64];
+      snprintf (pattern, sizeof (pattern),
+		load_p ? "lv.s\tS%u%u%u,%%1" : "sv.s\tS%u%u%u,%%0",
+		matrix, column, lane);
+      output_asm_insn (pattern, ops);
+    }
+  return "";
+}
+
 /* Return the appropriate instructions to move SRC into DEST.  Assume
    that SRC is operand 1 and DEST is operand 0.  */
 
@@ -9642,6 +9778,18 @@ mips_print_operand (FILE *file, rtx op, int letter)
 	output_operand_lossage ("invalid use of '%%%c'", letter);
       break;
 
+    case 'P':
+      /* GCC COP2 r112..r143 -> nonoverlapping Allegrex quad columns.  */
+      if (TARGET_ALLEGREX_VFPU && code == REG
+	  && COP2_REG_P (REGNO (op)) && GET_MODE (op) == V4SFmode)
+	{
+	  unsigned int n = REGNO (op) - COP2_REG_FIRST;
+	  fprintf (file, "C%u%u0", n / 4, n % 4);
+	}
+      else
+	output_operand_lossage ("invalid use of '%%%c'", letter);
+      break;
+
     case 'v':
       switch (GET_MODE (op))
 	{
@@ -13306,6 +13454,12 @@ mips_hard_regno_mode_ok_uncached (unsigned int regno, machine_mode mode)
   if (mode == CCmode || mode == CCEmode)
     return ISA_HAS_8CC ? ST_REG_P (regno) : regno == FPSW_REGNUM;
 
+  /* Each VFPU column has one hard register and no subregister modes.  */
+  if (TARGET_ALLEGREX_VFPU && COP2_REG_P (regno))
+    return mode == V4SFmode;
+  if (TARGET_ALLEGREX_VFPU && mode == V4SFmode && !GP_REG_P (regno))
+    return false;
+
   size = GET_MODE_SIZE (mode);
   mclass = GET_MODE_CLASS (mode);
 
@@ -13455,6 +13609,9 @@ mips_hard_regno_call_part_clobbered (unsigned int, unsigned int regno,
 static unsigned int
 mips_hard_regno_nregs (unsigned int regno, machine_mode mode)
 {
+  if (TARGET_ALLEGREX_VFPU && COP2_REG_P (regno) && mode == V4SFmode)
+    return 1;
+
   if (ST_REG_P (regno))
     /* The size of FP status registers is always 4, because they only hold
        CCmode values, and CCmode is always considered to be 4 bytes wide.  */
@@ -13480,6 +13637,9 @@ mips_class_max_nregs (enum reg_class rclass, machine_mode mode)
 {
   int size;
   HARD_REG_SET left;
+
+  if (TARGET_ALLEGREX_VFPU && rclass == COP2_REGS && mode == V4SFmode)
+    return 1;
 
   size = 0x8000;
   left = reg_class_contents[rclass];
@@ -13546,6 +13706,11 @@ mips_can_change_mode_class (machine_mode from,
 
      We therefore disallow all mode changes involving FPRs.  */
 
+  if (TARGET_ALLEGREX_VFPU
+      && (from == V4SFmode || to == V4SFmode)
+      && reg_classes_intersect_p (COP2_REGS, rclass))
+    return from == to;
+
   return !reg_classes_intersect_p (FP_REGS, rclass);
 }
 
@@ -13586,6 +13751,10 @@ mips_mode_ok_for_mov_fmt_p (machine_mode mode)
 static bool
 mips_modes_tieable_p (machine_mode mode1, machine_mode mode2)
 {
+  if (TARGET_ALLEGREX_VFPU
+      && (mode1 == V4SFmode || mode2 == V4SFmode))
+    return mode1 == mode2;
+
   /* FPRs allow no mode punning, so it's not worth tying modes if we'd
      prefer to put one of them in FPRs.  */
   return (mode1 == mode2
@@ -13889,6 +14058,9 @@ mips_vector_mode_supported_p (machine_mode mode)
 {
   switch (mode)
     {
+    case E_V4SFmode:
+      return TARGET_ALLEGREX_VFPU || MSA_SUPPORTED_MODE_P (mode);
+
     case E_V2SFmode:
       return TARGET_PAIRED_SINGLE_FLOAT;
 
@@ -13924,11 +14096,24 @@ mips_scalar_mode_supported_p (scalar_mode mode)
   return default_scalar_mode_supported_p (mode);
 }
 
+/* VFPU arithmetic does not implement the full scalar IEEE behavior.  */
+
+bool
+mips_vfpu_math_p (void)
+{
+  return (TARGET_ALLEGREX_VFPU
+	  && flag_unsafe_math_optimizations && flag_finite_math_only
+	  && !flag_rounding_math && !flag_trapping_math && !flag_signed_zeros);
+}
+
 /* Implement TARGET_VECTORIZE_PREFERRED_SIMD_MODE.  */
 
 static machine_mode
 mips_preferred_simd_mode (scalar_mode mode)
 {
+  if (mode == SFmode && mips_vfpu_math_p ())
+    return V4SFmode;
+
   if (TARGET_PAIRED_SINGLE_FLOAT
       && mode == SFmode)
     return V2SFmode;
@@ -13957,6 +14142,32 @@ mips_preferred_simd_mode (scalar_mode mode)
       break;
     }
   return word_mode;
+}
+
+/* Quad memory accesses require 128-bit alignment, even though the o32
+   vector type uses its usual ABI alignment.  */
+
+static poly_uint64
+mips_preferred_vector_alignment (const_tree type)
+{
+  if (TARGET_ALLEGREX_VFPU && TYPE_MODE (type) == V4SFmode)
+    return 128;
+
+  return default_preferred_vector_alignment (type);
+}
+
+/* Account for the identity prefixes and scalar lane transfers.  */
+
+static int
+mips_builtin_vectorization_cost (enum vect_cost_for_stmt kind, tree type,
+				 int misalign)
+{
+  if (TARGET_ALLEGREX_VFPU && type && TYPE_MODE (type) == V4SFmode
+      && (kind == vector_stmt || kind == unaligned_load
+	  || kind == unaligned_store))
+    return 4;
+
+  return default_builtin_vectorization_cost (kind, type, misalign);
 }
 
 /* Implement TARGET_VECTORIZE_AUTOVECTORIZE_VECTOR_MODES.  */
@@ -20502,6 +20713,16 @@ mips_option_override (void)
   if (mips_arch_info == 0)
     mips_set_architecture (mips_default_arch ());
 
+  if (TARGET_ALLEGREX_VFPU
+      && (!TARGET_ALLEGREX || TARGET_BIG_ENDIAN
+	  || (mips_abi != ABI_32 && mips_abi != ABI_EABI)
+	  || TARGET_64BIT
+	  || mips_base_compression_flags || TARGET_FLIP_MIPS16))
+    error ("%<-mvfpu%> requires little-endian uncompressed 32-bit "
+	   "Allegrex o32 or EABI");
+  if (TARGET_ALLEGREX_VFPU && (!TARGET_HARD_FLOAT || !TARGET_SINGLE_FLOAT))
+    error ("%<-mvfpu%> requires %<-mhard-float%> and %<-msingle-float%>");
+
   if (ABI_NEEDS_64BIT_REGS && !ISA_HAS_64BIT_REGS)
     error ("%<-march=%s%> is not compatible with the selected ABI",
 	   mips_arch_info->name);
@@ -21051,6 +21272,13 @@ mips_swap_registers (unsigned int i)
 static void
 mips_conditional_register_usage (void)
 {
+  /* Each COP2 register represents one caller-clobbered VFPU column.  */
+  if (TARGET_ALLEGREX_VFPU)
+    for (unsigned int r = COP2_REG_FIRST; r <= COP2_REG_LAST; ++r)
+      {
+	fixed_regs[r] = 0;
+	call_used_regs[r] = 1;
+      }
 
   if (ISA_HAS_DSP)
     {
@@ -23556,6 +23784,12 @@ mips_print_patchable_function_entry (FILE *file ATTRIBUTE_UNUSED,
 #undef TARGET_SCALAR_MODE_SUPPORTED_P
 #define TARGET_SCALAR_MODE_SUPPORTED_P mips_scalar_mode_supported_p
 
+#undef TARGET_VECTORIZE_PREFERRED_VECTOR_ALIGNMENT
+#define TARGET_VECTORIZE_PREFERRED_VECTOR_ALIGNMENT \
+  mips_preferred_vector_alignment
+#undef TARGET_VECTORIZE_BUILTIN_VECTORIZATION_COST
+#define TARGET_VECTORIZE_BUILTIN_VECTORIZATION_COST \
+  mips_builtin_vectorization_cost
 #undef TARGET_VECTORIZE_PREFERRED_SIMD_MODE
 #define TARGET_VECTORIZE_PREFERRED_SIMD_MODE mips_preferred_simd_mode
 #undef TARGET_VECTORIZE_AUTOVECTORIZE_VECTOR_MODES

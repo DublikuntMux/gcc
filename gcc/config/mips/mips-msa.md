@@ -95,6 +95,9 @@
 ;; All vector modes with 128 bits.
 (define_mode_iterator MSA      [V2DF V4SF V2DI V4SI V8HI V16QI])
 
+;; The V4SF move expander is shared by MSA and Allegrex VFPU.
+(define_mode_iterator MSA_MOVE [V2DF V2DI V4SI V8HI V16QI])
+
 ;; Same as MSA.  Used by vcond to iterate two modes.
 (define_mode_iterator MSA_2    [V2DF V4SF V2DI V4SI V8HI V16QI])
 
@@ -657,8 +660,8 @@
    (set_attr "mode" "<MODE>")])
 
 (define_expand "mov<mode>"
-  [(set (match_operand:MSA 0)
-	(match_operand:MSA 1))]
+  [(set (match_operand:MSA_MOVE 0)
+	(match_operand:MSA_MOVE 1))]
   "ISA_HAS_MSA"
 {
   if (mips_legitimize_move (<MODE>mode, operands[0], operands[1]))
@@ -666,8 +669,8 @@
 })
 
 (define_expand "movmisalign<mode>"
-  [(set (match_operand:MSA 0)
-	(match_operand:MSA 1))]
+  [(set (match_operand:MSA_MOVE 0)
+	(match_operand:MSA_MOVE 1))]
   "ISA_HAS_MSA"
 {
   if (mips_legitimize_move (<MODE>mode, operands[0], operands[1]))
@@ -935,32 +938,33 @@
    (set_attr "mode" "<MODE>")])
 
 ;; Floating-point operations
-(define_insn "add<mode>3"
-  [(set (match_operand:FMSA 0 "register_operand" "=f")
-	(plus:FMSA (match_operand:FMSA 1 "register_operand" "f")
-		   (match_operand:FMSA 2 "register_operand" "f")))]
+;; V4SF addition, subtraction and multiplication are shared with Allegrex.
+(define_insn "addv2df3"
+  [(set (match_operand:V2DF 0 "register_operand" "=f")
+	(plus:V2DF (match_operand:V2DF 1 "register_operand" "f")
+		   (match_operand:V2DF 2 "register_operand" "f")))]
   "ISA_HAS_MSA"
-  "fadd.<msafmt>\t%w0,%w1,%w2"
+  "fadd.d\t%w0,%w1,%w2"
   [(set_attr "type" "simd_fadd")
-   (set_attr "mode" "<MODE>")])
+   (set_attr "mode" "V2DF")])
 
-(define_insn "sub<mode>3"
-  [(set (match_operand:FMSA 0 "register_operand" "=f")
-	(minus:FMSA (match_operand:FMSA 1 "register_operand" "f")
-		    (match_operand:FMSA 2 "register_operand" "f")))]
+(define_insn "subv2df3"
+  [(set (match_operand:V2DF 0 "register_operand" "=f")
+	(minus:V2DF (match_operand:V2DF 1 "register_operand" "f")
+		    (match_operand:V2DF 2 "register_operand" "f")))]
   "ISA_HAS_MSA"
-  "fsub.<msafmt>\t%w0,%w1,%w2"
+  "fsub.d\t%w0,%w1,%w2"
   [(set_attr "type" "simd_fadd")
-   (set_attr "mode" "<MODE>")])
+   (set_attr "mode" "V2DF")])
 
-(define_insn "mul<mode>3"
-  [(set (match_operand:FMSA 0 "register_operand" "=f")
-	(mult:FMSA (match_operand:FMSA 1 "register_operand" "f")
-		   (match_operand:FMSA 2 "register_operand" "f")))]
+(define_insn "mulv2df3"
+  [(set (match_operand:V2DF 0 "register_operand" "=f")
+	(mult:V2DF (match_operand:V2DF 1 "register_operand" "f")
+		   (match_operand:V2DF 2 "register_operand" "f")))]
   "ISA_HAS_MSA"
-  "fmul.<msafmt>\t%w0,%w1,%w2"
+  "fmul.d\t%w0,%w1,%w2"
   [(set_attr "type" "simd_fmul")
-   (set_attr "mode" "<MODE>")])
+   (set_attr "mode" "V2DF")])
 
 (define_insn "div<mode>3"
   [(set (match_operand:FMSA 0 "register_operand" "=f")

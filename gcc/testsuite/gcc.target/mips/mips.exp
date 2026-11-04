@@ -299,6 +299,7 @@ foreach option {
     mcount-ra-address
     odd-spreg
     msa
+    vfpu
     loongson-mmi
     loongson-ext
     loongson-ext2
