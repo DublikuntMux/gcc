@@ -103,6 +103,9 @@
   UNSPEC_FMAX
   UNSPEC_FRINT
   UNSPEC_FCLASS
+  UNSPEC_CEIL_W_S
+  UNSPEC_FLOOR_W_S
+  UNSPEC_ROUND_W_S
 
   ;; HI/LO moves.
   UNSPEC_MFHI
@@ -4102,6 +4105,38 @@
   [(set_attr "type"	"fcvt")
    (set_attr "mode"	"SF")
    (set_attr "cnv_mode"	"S2I")])
+
+;; These instructions use a fixed rounding direction, independent of FCSR.
+;; In particular, round.w.s rounds ties to even rather than away from zero.
+(define_insn "allegrex_ceilsfsi2"
+  [(set (match_operand:SI 0 "register_operand" "=f")
+	(unspec:SI [(match_operand:SF 1 "register_operand" "f")]
+		   UNSPEC_CEIL_W_S))]
+  "TARGET_ALLEGREX && TARGET_HARD_FLOAT"
+  "ceil.w.s\t%0,%1"
+  [(set_attr "type" "fcvt")
+   (set_attr "mode" "SF")
+   (set_attr "cnv_mode" "S2I")])
+
+(define_insn "allegrex_floorsfsi2"
+  [(set (match_operand:SI 0 "register_operand" "=f")
+	(unspec:SI [(match_operand:SF 1 "register_operand" "f")]
+		   UNSPEC_FLOOR_W_S))]
+  "TARGET_ALLEGREX && TARGET_HARD_FLOAT"
+  "floor.w.s\t%0,%1"
+  [(set_attr "type" "fcvt")
+   (set_attr "mode" "SF")
+   (set_attr "cnv_mode" "S2I")])
+
+(define_insn "allegrex_roundsfsi2"
+  [(set (match_operand:SI 0 "register_operand" "=f")
+	(unspec:SI [(match_operand:SF 1 "register_operand" "f")]
+		   UNSPEC_ROUND_W_S))]
+  "TARGET_ALLEGREX && TARGET_HARD_FLOAT"
+  "round.w.s\t%0,%1"
+  [(set_attr "type" "fcvt")
+   (set_attr "mode" "SF")
+   (set_attr "cnv_mode" "S2I")])
 
 (define_insn "fix_truncsfsi2_macro"
   [(set (match_operand:SI 0 "register_operand" "=f")

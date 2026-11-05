@@ -16014,6 +16014,8 @@ AVAIL_NON_MIPS16 (loongson, TARGET_LOONGSON_MMI)
 AVAIL_MIPS16E2_OR_NON_MIPS16 (cache, TARGET_CACHE_BUILTIN)
 AVAIL_NON_MIPS16 (msa, TARGET_MSA)
 AVAIL_NON_MIPS16 (r6, mips_isa_rev >= 6)
+AVAIL_NON_MIPS16 (allegrex, TARGET_ALLEGREX)
+AVAIL_NON_MIPS16 (allegrex_float, TARGET_ALLEGREX && TARGET_HARD_FLOAT)
 
 /* Construct a mips_builtin_description from the given arguments.
 
@@ -16186,6 +16188,11 @@ AVAIL_NON_MIPS16 (r6, mips_isa_rev >= 6)
     { CODE_FOR_mipsr6_ ## INSN, MIPS_FP_COND_f,				\
     "__builtin_mipsr6_" #INSN,  MIPS_BUILTIN_DIRECT,			\
     FUNCTION_TYPE, mips_builtin_avail_r6, true }
+
+/* Preserve the Sony/PSPSDK names and prototypes for Allegrex intrinsics.  */
+#define ALLEGREX_BUILTIN(NAME, INSN, FUNCTION_TYPE, AVAIL)		\
+  { CODE_FOR_ ## INSN, MIPS_FP_COND_f, "__builtin_allegrex_" #NAME,	\
+    MIPS_BUILTIN_DIRECT, FUNCTION_TYPE, mips_builtin_avail_ ## AVAIL, false }
 
 #define CODE_FOR_mips_sqrt_ps CODE_FOR_sqrtv2sf2
 #define CODE_FOR_mips_addq_ph CODE_FOR_addv2hi3
@@ -16616,6 +16623,19 @@ static const struct mips_builtin_description mips_builtins[] = {
   DIRECT_BUILTIN_PURE (dpaqx_sa_w_ph, MIPS_DI_FTYPE_DI_V2HI_V2HI, dspr2_32),
   DIRECT_BUILTIN_PURE (dpsqx_s_w_ph, MIPS_DI_FTYPE_DI_V2HI_V2HI, dspr2_32),
   DIRECT_BUILTIN_PURE (dpsqx_sa_w_ph, MIPS_DI_FTYPE_DI_V2HI_V2HI, dspr2_32),
+
+  /* Allegrex intrinsics used by PSPSDK.  */
+  ALLEGREX_BUILTIN (wsbw, bswapsi2, MIPS_SI_FTYPE_SI, allegrex),
+  ALLEGREX_BUILTIN (wsbh, bswaphi2, MIPS_HI_FTYPE_HI, allegrex),
+  ALLEGREX_BUILTIN (sqrt_s, sqrtsf2, MIPS_SF_FTYPE_SF, allegrex_float),
+  ALLEGREX_BUILTIN (ceil_w_s, allegrex_ceilsfsi2, MIPS_SI_FTYPE_SF,
+		    allegrex_float),
+  ALLEGREX_BUILTIN (floor_w_s, allegrex_floorsfsi2, MIPS_SI_FTYPE_SF,
+		    allegrex_float),
+  ALLEGREX_BUILTIN (round_w_s, allegrex_roundsfsi2, MIPS_SI_FTYPE_SF,
+		    allegrex_float),
+  ALLEGREX_BUILTIN (trunc_w_s, fix_truncsfsi2_insn, MIPS_SI_FTYPE_SF,
+		    allegrex_float),
 
   /* Builtin functions for ST Microelectronics Loongson-2E/2F cores.  */
   LOONGSON_BUILTIN (packsswh, MIPS_V4HI_FTYPE_V2SI_V2SI),
