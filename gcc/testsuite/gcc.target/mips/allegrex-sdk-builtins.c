@@ -1,5 +1,6 @@
 /* { dg-do compile } */
-/* { dg-options "-O2 -march=allegrex -mabi=32 -EL -mno-mips16 -mno-micromips -mhard-float -msingle-float -Werror=implicit-function-declaration" } */
+/* { dg-options "-march=allegrex -mabi=32 -EL -mno-mips16 -mno-micromips -mhard-float -msingle-float" } */
+/* { dg-additional-options "-Werror=implicit-function-declaration" } */
 
 /* Check the intrinsics used by PSPSDK's math and network headers.  The
    conversion results are integers transferred from the scalar FPU.  */
