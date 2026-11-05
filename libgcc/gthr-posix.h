@@ -90,6 +90,14 @@ typedef struct timespec __gthread_time_t;
 #define __GTHREAD_COND_INIT PTHREAD_COND_INITIALIZER
 #define __GTHREAD_TIME_INIT {0,0}
 
+/* PSP mutexes allocate kernel semaphores lazily and must be destroyed even
+   when a static initializer is available.  Function initialization makes
+   libstdc++ mutex wrappers also run their native mutex destructors.  */
+#ifdef __PSP__
+# define _GTHREAD_USE_MUTEX_INIT_FUNC
+# define _GTHREAD_USE_RECURSIVE_MUTEX_INIT_FUNC
+#endif
+
 #ifdef _GTHREAD_USE_MUTEX_INIT_FUNC
 # undef __GTHREAD_MUTEX_INIT
 #endif
