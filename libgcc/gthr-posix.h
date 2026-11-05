@@ -94,8 +94,8 @@ typedef struct timespec __gthread_time_t;
    when a static initializer is available.  Function initialization makes
    libstdc++ mutex wrappers also run their native mutex destructors.  */
 #ifdef __PSP__
-# define _GTHREAD_USE_MUTEX_INIT_FUNC
-# define _GTHREAD_USE_RECURSIVE_MUTEX_INIT_FUNC
+# define _GTHREAD_USE_MUTEX_INIT_FUNC 1
+# define _GTHREAD_USE_RECURSIVE_MUTEX_INIT_FUNC 1
 #endif
 
 #ifdef _GTHREAD_USE_MUTEX_INIT_FUNC
