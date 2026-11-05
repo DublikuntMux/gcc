@@ -150,6 +150,12 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 #endif
 #endif
 
+#if defined(__PSP__)
+/* PSP pthread support is linked from static libraries.  Weak references
+   would not pull in the required implementation.  */
+#undef GTHREAD_USE_WEAK
+#define GTHREAD_USE_WEAK 0
+#endif
 #ifndef GTHREAD_USE_WEAK
 #define GTHREAD_USE_WEAK 1
 #endif

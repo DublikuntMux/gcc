@@ -2860,6 +2860,17 @@ mipstx39-*-elf* | mipstx39el-*-elf*)
 	tm_file="elfos.h newlib-stdint.h ${tm_file} mips/r3900.h mips/elf.h"
 	tmake_file="mips/t-r3900"
 	;;
+mipsallegrex-*-elf* | mipsallegrexel-*-elf*)
+	tm_file="elfos.h newlib-stdint.h ${tm_file} mips/elf.h"
+	tmake_file="${tmake_file} mips/t-elf"
+	target_cpu_default="MASK_SINGLE_FLOAT|MASK_DIVIDE_BREAKS"
+	tm_defines="${tm_defines} MIPS_ISA_DEFAULT=2 MIPS_CPU_STRING_DEFAULT=\\\"allegrex\\\" MIPS_ABI_DEFAULT=ABI_EABI"
+	case ${target} in
+	mipsallegrex*-psp-elf*)
+		tm_file="${tm_file} mips/psp.h"
+		;;
+	esac
+	;;
 mmix-knuth-mmixware)
 	tm_file="${tm_file} newlib-stdint.h"
 	use_gcc_stdint=wrap
@@ -4176,6 +4187,9 @@ esac
 # This block sets nothing except for with_arch.
 if test x$with_arch = x ; then
   case ${target} in
+    mipsallegrex*-psp-elf*)
+      with_arch=allegrex
+      ;;
     i[34567]86-*-darwin*|x86_64-*-darwin*)
       # Default arch is set via TARGET_SUBTARGET32_ISA_DEFAULT
       # and TARGET_SUBTARGET64_ISA_DEFAULT in config/i386/darwin.h.
@@ -4252,8 +4266,9 @@ fi
 # Infer a default setting for --with-fpu.
 if test x$with_fpu = x; then
   case ${target} in
-    mips64r5900-*-* | mips64r5900el-*-* | mipsr5900-*-* | mipsr5900el-*-*)
-      # The R5900 FPU only supports single precision.
+    mips64r5900-*-* | mips64r5900el-*-* | mipsr5900-*-* | mipsr5900el-*-* | \
+    mipsallegrex-*-* | mipsallegrexel-*-*)
+      # The R5900 and Allegrex FPUs only support single precision.
       with_fpu=single
       ;;
   esac

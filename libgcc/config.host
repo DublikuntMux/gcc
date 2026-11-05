@@ -151,7 +151,14 @@ mips*-*-*)
 	cpu_type=mips
 	tmake_file="mips/t-mips"
 	if test "${libgcc_cv_mips_hard_float}" = yes; then
-		tmake_file="${tmake_file} t-hardfp-sfdf t-hardfp"
+		case ${host} in
+		mipsallegrex*-psp-elf*)
+			tmake_file="${tmake_file} t-hardfp-sf t-hardfp"
+			;;
+		*)
+			tmake_file="${tmake_file} t-hardfp-sfdf t-hardfp"
+			;;
+		esac
 	else
 		tmake_file="${tmake_file} t-softfp-sfdf"
 	fi
@@ -1138,6 +1145,10 @@ mips-wrs-vxworks)
 	;;
 mipstx39-*-elf* | mipstx39el-*-elf*)
 	tmake_file="$tmake_file mips/t-crtstuff mips/t-mips16"
+	;;
+mipsallegrex*-psp-elf*)
+	tmake_file="$tmake_file mips/t-allegrex-psp"
+	extra_parts="$extra_parts crti.o crtn.o"
 	;;
 mmix-knuth-mmixware)
 	extra_parts="crti.o crtn.o crtbegin.o crtend.o"

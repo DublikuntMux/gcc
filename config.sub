@@ -492,8 +492,8 @@ case $1 in
 				basic_os=linux
 				;;
 			psp)
-				basic_machine=mipsallegrexel-sony
-				basic_os=psp
+				basic_machine=mipsallegrexel-psp
+				basic_os=elf
 				;;
 			pw32)
 				basic_machine=i586-unknown
@@ -1161,9 +1161,9 @@ case $cpu-$vendor in
 		cpu=nsx
 		vendor=tandem
 		;;
-	mipsallegrexel-sony)
+	mipsallegrexel-psp)
 		cpu=mipsallegrexel
-		vendor=sony
+		vendor=psp
 		;;
 	tile*-*)
 		basic_os=${basic_os:-linux-gnu}
